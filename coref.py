@@ -1,5 +1,12 @@
 # TODO:
 # Early stopping
+import io
+
+import attr
+
+from loader import Span, GLOVE, lookup_tensor, test_corpus, val_corpus, train_corpus
+from utils import to_cuda, compute_idx_spans, unpack_and_unpad, pack, flatten, extract_gold_corefs, safe_divide, \
+    pad_and_stack, to_var, pairwise_indexes, speaker_label, prune
 
 print('Initializing...')
 import torch
@@ -16,9 +23,7 @@ from random import sample
 from datetime import datetime
 from subprocess import Popen, PIPE
 from boltons.iterutils import pairwise
-from loader import *
-from utils import *
-
+import os
 
 class Score(nn.Module):
     """ Generic scoring module
@@ -169,7 +174,7 @@ class DocumentEncoder(nn.Module):
 
         # Unit vector embeddings as per Section 7.1 of paper
         glove_weights = F.normalize(GLOVE.weights())
-        turian_weights = F.normalize(TURIAN.weights())
+        # turian_weights = F.normalize(TURIAN.weights())
 
         # GLoVE
         self.glove = nn.Embedding(glove_weights.shape[0], glove_weights.shape[1])
@@ -177,15 +182,15 @@ class DocumentEncoder(nn.Module):
         self.glove.weight.requires_grad = False
 
         # Turian
-        self.turian = nn.Embedding(turian_weights.shape[0], turian_weights.shape[1])
-        self.turian.weight.data.copy_(turian_weights)
-        self.turian.weight.requires_grad = False
+        # self.turian = nn.Embedding(turian_weights.shape[0], turian_weights.shape[1])
+        # self.turian.weight.data.copy_(turian_weights)
+        # self.turian.weight.requires_grad = False
 
         # Character
         self.char_embeddings = CharCNN(char_filters)
 
         # Sentence-LSTM
-        self.lstm = nn.LSTM(glove_weights.shape[1]+turian_weights.shape[1]+char_filters,
+        self.lstm = nn.LSTM(glove_weights.shape[1]+char_filters,
                             hidden_dim,
                             num_layers=n_layers,
                             bidirectional=True,
@@ -225,13 +230,13 @@ class DocumentEncoder(nn.Module):
         glove_embeds = self.glove(lookup_tensor(sent, GLOVE))
 
         # Embed again using Turian this time
-        tur_embeds = self.turian(lookup_tensor(sent, TURIAN))
+        # tur_embeds = self.turian(lookup_tensor(sent, TURIAN))
 
         # Character embeddings
         char_embeds = self.char_embeddings(sent)
 
         # Concatenate them all together
-        embeds = torch.cat((glove_embeds, tur_embeds, char_embeds), dim=1)
+        embeds = torch.cat((glove_embeds, char_embeds), dim=1)
 
         return embeds
 
@@ -455,6 +460,7 @@ class Trainer:
     def train(self, num_epochs, eval_interval=10, *args, **kwargs):
         """ Train a model """
         for epoch in range(1, num_epochs+1):
+            print('epoch: %d'%epoch)
             self.train_epoch(epoch, *args, **kwargs)
 
             # Save often
@@ -548,7 +554,7 @@ class Trainer:
 
         # Negative marginal log-likelihood
         eps = 1e-8
-        loss = torch.sum(torch.log(torch.sum(torch.mul(probs, gold_indexes), dim=1).clamp_(eps, 1-eps), dim=0) * -1
+        loss = torch.sum(torch.log(torch.sum(torch.mul(probs, gold_indexes), dim=1).clamp_(eps, 1-eps), dim=0) * -1)
 
         # Backpropagate
         loss.backward()

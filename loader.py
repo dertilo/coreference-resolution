@@ -1,8 +1,9 @@
+import gzip
+import json
+from typing import List, Dict, Tuple, Any
+import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from torchtext.vocab import Vectors
-from torch.autograd import Variable
 
 import os, io, re, attr, random
 from fnmatch import fnmatch
@@ -10,7 +11,7 @@ from copy import deepcopy as c
 from boltons.iterutils import pairwise
 from cached_property import cached_property
 
-from utils import *
+from utils import to_cuda, flatten, compute_idx_spans
 
 NORMALIZE_DICT = {"/.": ".", "/?": "?",
                   "-LRB-": "(", "-RRB-": ")",
@@ -64,6 +65,10 @@ class Document:
 
     def __len__(self):
         return len(self.tokens)
+
+    @property
+    def clusters(self)->Dict[Any,List[Tuple[int,int,str]]]:
+        return {i:[(c['start'],c['end'],' '.join(self.tokens[c['start']:c['end']+1])) for c in cluster] for i,cluster in enumerate(self.corefs)}
 
     @cached_property
     def sents(self):
@@ -184,7 +189,7 @@ class LazyVectors:
 
     def get_vocab(self, filename):
         """ Read in vocabulary (top 30K words, covers ~93.5% of all tokens) """
-        return read_file(filename)
+        return read_file(filename) #TODO(tilo): the-FAQ!
 
     def set_dicts(self):
         """ _stoi: map string > index
@@ -219,10 +224,38 @@ class LazyVectors:
 
 
 def read_corpus(dirname):
-    conll_files = parse_filenames(dirname=dirname, pattern="*gold_conll")
-    return Corpus(flatten([load_file(file) for file in conll_files]))
+    # conll_files = parse_filenames(dirname=dirname, pattern="*gold_conll")
+    return Corpus(load_file_scisci_format(dirname))
 
-def load_file(filename):
+def read_jsons_from_file(file, limit=np.Inf):
+    with gzip.open(file, mode="rb") if file.endswith('.gz') else open(file, mode="rb") as f:
+        counter=0
+        for line in f:
+            # assert isinstance(line,bytes)
+            counter += 1
+            if counter > limit: break
+            yield json.loads(line.decode('utf-8'))
+
+def load_file_scisci_format(filename)->List[Document]:
+    def process_json(d):
+        coref_clusters = [[
+            {'label': i,
+             'start': start,
+             'end': end,
+             'span': (start, end)
+             }
+            for start, end in cluster]
+            for i, cluster in enumerate(d['clusters'])]
+        tokens = [token for sentence in d['sentences'] for token in sentence]
+        raw_text = ' '.join(tokens)
+
+        coref_clusters = [c for cluster in coref_clusters for c in cluster]
+        doc = Document(raw_text, tokens, coref_clusters, 'deineMutter' * len(tokens), 'boringShit', filename)
+        return doc
+
+    return [process_json(json) for json in read_jsons_from_file(filename)]
+
+def load_file_conll_format(filename):
     """ Load a *._conll file
     Input:
         filename: path to the file
@@ -321,16 +354,16 @@ def lookup_tensor(tokens, vectorizer):
     """ Convert a sentence to an embedding lookup tensor """
     return to_cuda(torch.tensor([vectorizer.stoi(t) for t in tokens]))
 
-
-# Load in corpus, lazily load in word vectors.
-train_corpus = read_corpus('../data/train/')
-val_corpus = read_corpus('../data/development/')
-test_corpus = read_corpus('../data/test/')
-
+# if __name__ == '__main__':
+    # Load in corpus, lazily load in word vectors.
+train_corpus = read_corpus('/home/tilo/code/NLP/IE/sciie/data/processed_data/json/train.json')
+val_corpus = read_corpus('/home/tilo/code/NLP/IE/sciie/data/processed_data/json/train.json')
+test_corpus = read_corpus('/home/tilo/code/NLP/IE/sciie/data/processed_data/json/test.json')
+    #
 GLOVE = LazyVectors.from_corpus(train_corpus.vocab,
                                 name='glove.840B.300d.txt',
-                                cache='/Users/sob/github/.vector_cache/')
+                                cache='/home/tilo/data/embeddings')
 
-TURIAN = LazyVectors.from_corpus(train_corpus.vocab,
-                                 name='hlbl-embeddings-scaled.EMBEDDING_SIZE=50',
-                                 cache='/Users/sob/github/.vector_cache/')
+# TURIAN = LazyVectors.from_corpus(train_corpus.vocab,
+#                                  name='hlbl-embeddings-scaled.EMBEDDING_SIZE=50',
+#                                  cache='/Users/sob/github/.vector_cache/')
