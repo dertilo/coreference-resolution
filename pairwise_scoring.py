@@ -75,14 +75,12 @@ class PairwiseScorer(nn.Module):
 
         # Batch and softmax
         # get the softmax of the scores for each span in the document given
-        probs = [F.softmax(tensr) for tensr in with_epsilon]
+        probs = [F.softmax(tensr,dim=0) for tensr in with_epsilon]
 
         # pad the scores for each one with a dummy value, 1000 so that the tensors can
         # be of the same dimension for calculation loss and what not.
-        probs, _ = pad_and_stack(probs, value=1000)
-        probs = probs.squeeze()
-
-        return spans, probs
+        padded_probs, _ = pad_and_stack(probs, value=1000).squeeze()
+        return spans, padded_probs
 
 
 class Genre(nn.Module):
