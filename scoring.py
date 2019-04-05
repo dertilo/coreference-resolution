@@ -3,9 +3,7 @@ from torch import nn as nn
 from utils import to_cuda
 
 
-class Score(nn.Module):
-    """ Generic scoring module
-    """
+class FFNN(nn.Module):
     def __init__(self, embeds_dim, hidden_dim=150):
         super().__init__()
 
@@ -24,7 +22,7 @@ class Score(nn.Module):
         return self.score(x)
 
 
-class Distance(nn.Module):
+class DistanceEmbedder(nn.Module):
     """ Learned, continuous representations for: span widths, distance
     between spans
     """
@@ -44,8 +42,9 @@ class Distance(nn.Module):
         """ Embedding table lookup """
         return self.embeds(self.stoi(*args))
 
+    def num_bins_smaller_thresh(self,thresh):
+        return sum([True for i in self.bins if thresh >= i])
+
     def stoi(self, lengths):
-        """ Find which bin a number falls into """
-        return to_cuda(torch.tensor([
-            sum([True for i in self.bins if num >= i]) for num in lengths], requires_grad=False
-        ))
+        tensor = torch.tensor([self.num_bins_smaller_thresh(length) for length in lengths], requires_grad=False)
+        return to_cuda(tensor)

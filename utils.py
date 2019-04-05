@@ -89,7 +89,7 @@ def remove_overlapping(sorted_spans):
     # have already been seen in an accepted span
     nonoverlapping, seen = [], set()
     for s in sorted_spans:
-        indexes = range(s.i1, s.i2+1)
+        indexes = range(s.start, s.end+1)
         taken = [i in seen for i in indexes]
         if len(set(taken)) == 1 or (taken[0] == taken[-1] == False):
             nonoverlapping.append(s)
@@ -99,7 +99,7 @@ def remove_overlapping(sorted_spans):
 
 def pairwise_indexes(spans):
     """ Get indices for indexing into pairwise_scores """
-    indexes = [0] + [len(s.yi) for s in spans]
+    indexes = [0] + [len(s.antecedent_spans) for s in spans]
     indexes = [sum(indexes[:idx+1]) for idx, _ in enumerate(indexes)]
     return pairwise(indexes)
 
@@ -131,13 +131,15 @@ def extract_gold_corefs(document):
 
     return gold_corefs, total_corefs, gold_mentions, total_mentions
 
-def compute_idx_spans(sentences, L=10):
+def compute_idx_spans(sentences, max_num_tokens_in_span=10):
     """ Compute span indexes for all possible spans up to length L in each
     sentence """
+    def spans_in_sentence(sent, length,shift):
+        return windowed(range(shift, len(sent)+shift), length)
+
     idx_spans, shift = [], 0
     for sent in sentences:
-        sent_spans = flatten([windowed(range(shift, len(sent)+shift), length)
-                              for length in range(1, L)])
+        sent_spans = flatten([spans_in_sentence(sent,length,shift) for length in range(1, max_num_tokens_in_span)])
         idx_spans.extend(sent_spans)
         shift += len(sent)
 
@@ -145,8 +147,8 @@ def compute_idx_spans(sentences, L=10):
 
 def s_to_speaker(span, speakers):
     """ Compute speaker of a span """
-    if speakers[span.i1] == speakers[span.i2]:
-        return speakers[span.i1]
+    if speakers[span.start] == speakers[span.end]:
+        return speakers[span.start]
     return None
 
 def speaker_label(s1, s2):

@@ -2,9 +2,10 @@
 # Early stopping
 import io
 
+from data_schema import Document
 from document_embedding import DocumentEncoder
 from loader import test_corpus, val_corpus, train_corpus
-from pairwise_scoring import PairwiseScore
+from pairwise_scoring import PairwiseScorer
 from mention_scoring import MentionScorer
 from utils import to_cuda, flatten, extract_gold_corefs, safe_divide
 
@@ -45,22 +46,15 @@ class CorefScore(nn.Module):
 
         # Initialize modules
         self.encoder = DocumentEncoder(hidden_dim, char_filters)
-        self.score_spans = MentionScorer(gi_dim, attn_dim, distance_dim)
-        self.score_pairs = PairwiseScore(gij_dim, distance_dim, genre_dim, speaker_dim)
+        self.span_scorer = MentionScorer(gi_dim, attn_dim, distance_dim)
+        self.span_pair_scorer = PairwiseScorer(gij_dim, distance_dim, genre_dim, speaker_dim)
 
-    def forward(self, doc):
-        """ Enocde document
-            Predict unary mention scores, prune them
-            Predict pairwise coreference scores
-        """
-        # Encode the document, keep the LSTM hidden states and embedded tokens
-        states, embeds = self.encoder(doc)
+    def forward(self, doc:Document):
+        contextualized_encoded, embeds = self.encoder(doc.sents)
 
-        # Get mention scores for each span, prune
-        spans, g_i, mention_scores = self.score_spans(states, embeds, doc)
+        spans, g_i, mention_scores = self.span_scorer(contextualized_encoded, embeds, doc)
 
-        # Get pairwise scores for each span combo
-        spans, coref_scores = self.score_pairs(spans, g_i, mention_scores)
+        spans, coref_scores = self.span_pair_scorer(spans, g_i, mention_scores)
 
         return spans, coref_scores
 
@@ -139,7 +133,7 @@ class Trainer:
                 % (epoch, np.mean(epoch_loss), np.mean(epoch_mentions),
                     np.mean(epoch_corefs), np.mean(epoch_identified)))
 
-    def train_doc(self, document):
+    def train_doc(self, document:Document):
         """ Compute loss for a forward pass over a document """
 
         # Extract gold coreference links
@@ -160,12 +154,12 @@ class Trainer:
         for idx, span in enumerate(spans):
 
             # Log number of mentions found
-            if (span.i1, span.i2) in gold_mentions:
+            if (span.start, span.end) in gold_mentions:
                 mentions_found += 1
 
                 # Check which of these tuples are in the gold set, if any
                 golds = [
-                    i for i, link in enumerate(span.yi_idx)
+                    i for i, link in enumerate(span.antecedent_span_ids)
                     if link in gold_corefs
                 ]
 
@@ -175,11 +169,11 @@ class Trainer:
 
                     # Progress logging for recall
                     corefs_found += len(golds)
-                    found_corefs = sum((probs[idx, golds] > probs[idx, len(span.yi_idx)])).detach()
+                    found_corefs = sum((probs[idx, golds] > probs[idx, len(span.antecedent_span_ids)])).detach()
                     corefs_chosen += found_corefs.item()
                 else:
                     # Otherwise, set gold to dummy
-                    gold_indexes[idx, len(span.yi_idx)] = 1
+                    gold_indexes[idx, len(span.antecedent_span_ids)] = 1
 
         # Negative marginal log-likelihood
         eps = 1e-8
@@ -244,7 +238,7 @@ class Trainer:
                 # Add edges between all spans in the cluster
                 for coref_idx in found_corefs:
                     link = spans[coref_idx]
-                    graph.add_edge((span.i1, span.i2), (link.i1, link.i2))
+                    graph.add_edge((span.start, span.end), (link.start, link.end))
 
         # Extract clusters as nodes that share an edge
         clusters = list(nx.connected_components(graph))
@@ -254,14 +248,14 @@ class Trainer:
 
         # Add in cluster ids for each cluster of corefs in place of token tag
         for idx, cluster in enumerate(clusters):
-            for i1, i2 in cluster:
+            for start, end in cluster:
 
-                if i1 == i2:
-                    token_tags[i1].append(f'({idx})')
+                if start == end:
+                    token_tags[start].append(f'({idx})')
 
                 else:
-                    token_tags[i1].append(f'({idx}')
-                    token_tags[i2].append(f'{idx})')
+                    token_tags[start].append(f'({idx}')
+                    token_tags[end].append(f'{idx})')
 
         doc.tags = ['|'.join(t) if t else '-' for t in token_tags]
 

@@ -21,15 +21,8 @@ class Document:
         # Filled in at evaluation time.
         self.tags = None
 
-    def __getitem__(self, idx):
-        return (self.tokens[idx], self.corefs[idx], \
-                self.speakers[idx], self.genre)
-
     def __repr__(self):
         return 'Document containing %d tokens' % len(self.tokens)
-
-    def __len__(self):
-        return len(self.tokens)
 
     @property
     def clusters(self)->Dict[Any,List[Tuple[int,int,str]]]:
@@ -45,13 +38,7 @@ class Document:
                     if token in ['.', '?', '!']] # TODO(tilo): WTF!!!
 
         # Regroup (returns list of lists)
-        return [self.tokens[i1:i2] for i1, i2 in pairwise([0] + sent_idx)]
-
-    def spans(self):
-        """ Create Span object for each span """
-        return [Span(i1=i[0], i2=i[-1], id=idx,
-                    speaker=self.speaker(i), genre=self.genre)
-                for idx, i in enumerate(compute_idx_spans(self.sents))]
+        return [self.tokens[start:end] for start, end in pairwise([0] + sent_idx)]
 
     def truncate(self, MAX=50):
         """ Randomly truncate the document to up to MAX sentences """
@@ -73,30 +60,20 @@ class Document:
 @attr.s(frozen=True, repr=False)
 class Span:
 
-    # Left / right token indexes
-    i1 = attr.ib()
-    i2 = attr.ib()
+    start = attr.ib()
+    end = attr.ib()
 
     # Id within total spans (for indexing into a batch computation)
     id = attr.ib()
-
-    # Speaker
     speaker = attr.ib()
-
-    # Genre
     genre = attr.ib()
 
-    # Unary mention score, as tensor
-    si = attr.ib(default=None)
-
-    # List of candidate antecedent spans
-    yi = attr.ib(default=None)
-
-    # Corresponding span ids to each yi
-    yi_idx = attr.ib(default=None)
+    mention_score = attr.ib(default=None)
+    antecedent_spans = attr.ib(default=None)
+    antecedent_span_ids = attr.ib(default=None)
 
     def __len__(self):
-        return self.i2-self.i1+1
+        return self.end - self.start + 1
 
     def __repr__(self):
         return 'Span representing %d tokens' % (self.__len__())

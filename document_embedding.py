@@ -1,3 +1,5 @@
+from typing import List
+
 import torch
 from torch import nn as nn
 from torch.nn import functional as F
@@ -40,45 +42,29 @@ class DocumentEncoder(nn.Module):
         self.emb_dropout = nn.Dropout(0.50, inplace=True)
         self.lstm_dropout = nn.Dropout(0.20, inplace=True)
 
-    def forward(self, doc):
-        """ Convert document words to ids, embed them, pass through LSTM. """
+    def forward(self, sents:List[List[str]]):
+        embeds = [self.embed(s) for s in sents]
 
-        # Embed document
-        embeds = [self.embed(s) for s in doc.sents]
-
-        # Batch for LSTM
         packed, reorder = pack(embeds)
-
-        # Apply embedding dropout
         self.emb_dropout(packed[0])
 
-        # Pass an LSTM over the embeds
+        output = self.contextual_encoding(packed)
+
+        contextual_encoded = unpack_and_unpad(output, reorder)
+
+        return torch.cat(contextual_encoded, dim=0), torch.cat(embeds, dim=0)
+
+    def contextual_encoding(self, packed):
         output, _ = self.lstm(packed)
-
-        # Apply dropout
         self.lstm_dropout(output[0])
-
-        # Undo the packing/padding required for batching
-        states = unpack_and_unpad(output, reorder)
-
-        return torch.cat(states, dim=0), torch.cat(embeds, dim=0)
+        return output
 
     def embed(self, sent):
-        """ Embed a sentence using GLoVE, Turian, and character embeddings """
-
-        # Embed the tokens with Glove
         glove_embeds = self.glove(lookup_tensor(sent, GLOVE))
-
-        # Embed again using Turian this time
         # tur_embeds = self.turian(lookup_tensor(sent, TURIAN))
-
-        # Character embeddings
         char_embeds = self.char_embeddings(sent)
 
-        # Concatenate them all together
-        embeds = torch.cat((glove_embeds, char_embeds), dim=1)
-
-        return embeds
+        return torch.cat((glove_embeds, char_embeds), dim=1)
 
 
 class CharCNN(nn.Module):
