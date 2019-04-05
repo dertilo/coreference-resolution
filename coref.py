@@ -134,19 +134,13 @@ class Trainer:
                     np.mean(epoch_corefs), np.mean(epoch_identified)))
 
     def train_doc(self, document:Document):
-        """ Compute loss for a forward pass over a document """
 
-        # Extract gold coreference links
-        gold_corefs, total_corefs, \
-            gold_mentions, total_mentions = extract_gold_corefs(document)
+        gold_corefs, gold_mentions = extract_gold_corefs(document)
 
-        # Zero out optimizer gradients
         self.optimizer.zero_grad()
 
-        # Init metrics
         mentions_found, corefs_found, corefs_chosen = 0, 0, 0
 
-        # Predict coref probabilites for each span in a document
         spans, probs = self.model(document)
 
         # Get log-likelihood of correct antecedents implied by gold clustering
@@ -185,8 +179,8 @@ class Trainer:
         # Step the optimizer
         self.optimizer.step()
 
-        return (loss.item(), mentions_found, total_mentions,
-                corefs_found, total_corefs, corefs_chosen)
+        return (loss.item(), mentions_found, len(gold_mentions),
+                corefs_found, len(gold_corefs), corefs_chosen)
 
     def evaluate(self, val_corpus, eval_script='../src/eval/scorer.pl'):
         """ Evaluate a corpus of CoNLL-2012 gold files """

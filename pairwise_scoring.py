@@ -22,48 +22,43 @@ class PairwiseScorer(nn.Module):
 
         self.score = FFNN(gij_dim)
 
-    def forward(self, spans:List[Span], g_i, mention_scores):
+    def forward(self, spans:List[Span], span_representations, mention_scores):
 
-        mention_ids, antecedent_ids, \
-            distances, genres, speakers = zip(*[(i.id, j.id,
-                                                i.end-j.start, i.genre,
-                                                speaker_label(i, j))
-                                                for i in spans
-                                                for j in i.antecedent_spans])
+        mention_ids, antecedent_ids, distances, genres, speakers = zip(*[
+            (span.id, ant_span.id, span.end-ant_span.start, span.genre, speaker_label(span, ant_span))
+                                                for span in spans
+                                                for ant_span in span.antecedent_spans])
 
-        # For indexing a tensor efficiently
         mention_ids = to_cuda(torch.tensor(mention_ids))
         antecedent_ids = to_cuda(torch.tensor(antecedent_ids))
 
-        # Embed them
         phi = torch.cat((self.distance(distances),
                          self.genre(genres),
                          self.speaker(speakers)), dim=1)
 
-        # Extract their span representations from the g_i matrix
-        i_g = torch.index_select(g_i, 0, mention_ids)
-        j_g = torch.index_select(g_i, 0, antecedent_ids)
+        def get_representations(ids):
+            return torch.index_select(span_representations,0,ids)
 
-        # Create s_ij representations
-        pairs = torch.cat((i_g, j_g, i_g*j_g, phi), dim=1)
+        m_r = get_representations(mention_ids)
+        a_r = get_representations(antecedent_ids)
 
-        # Extract mention score for each mention and its antecedents
-        s_i = torch.index_select(mention_scores, 0, mention_ids)
-        s_j = torch.index_select(mention_scores, 0, antecedent_ids)
+        pairs = torch.cat((m_r, a_r, m_r*a_r, phi), dim=1)
 
-        # Score pairs of spans for coreference link
-        s_ij = self.score(pairs)
 
-        # Compute pairwise scores for coreference links between each mention and
-        # its antecedents
-        coref_scores = torch.sum(torch.cat((s_i, s_j, s_ij), dim=1), dim=1, keepdim=True)
+        def get_mention_scores(ids):
+            return torch.index_select(mention_scores,0,ids)
 
-        # Update spans with set of possible antecedents' indices, scores
+        m_s = get_mention_scores(mention_ids)#in paper: s_i
+        a_s = get_mention_scores(antecedent_ids)#in paper: s_j
+        am_s = self.score(pairs)#in paper: s_ij
+
+        coref_scores = torch.sum(torch.cat((m_s, a_s, am_s), dim=1), dim=1, keepdim=True)
+
         spans = [
             attr.evolve(span,
-                        antecedent_span_ids=[((y.start, y.end), (span.start, span.end)) for y in span.antecedent_spans]
+                        antecedent_span_ids=[((ant_span.start, ant_span.end), (span.start, span.end)) for ant_span in span.antecedent_spans]
                         )
-            for span, score, (start, end) in zip(spans, coref_scores, pairwise_indexes(spans))
+            for span, score in zip(spans, coref_scores)
         ]
 
         # Get antecedent indexes for each span

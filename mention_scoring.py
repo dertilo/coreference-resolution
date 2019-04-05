@@ -42,9 +42,9 @@ class MentionScorer(nn.Module):
         # TODO: figure out a way to batch
         lstm_embed_start_end = torch.stack([torch.cat((context_enc[s.start], context_enc[s.end])) for s in spans])
 
-        span_representation = torch.cat((lstm_embed_start_end, attn_embeds, widths), dim=1) # g_i in paper
+        span_representations = torch.cat((lstm_embed_start_end, attn_embeds, widths), dim=1) # g_i in paper
 
-        mention_scores = self.ffnn(span_representation)
+        mention_scores = self.ffnn(span_representations)
 
         # Update span object attributes
         # (use detach so we don't get crazy gradients by splitting the tensors)
@@ -63,7 +63,7 @@ class MentionScorer(nn.Module):
             for idx, span in enumerate(spans)
         ]
 
-        return spans, span_representation, mention_scores
+        return spans, span_representations, mention_scores
 
 
 def prune(spans, T, LAMBDA=0.40):
