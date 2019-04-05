@@ -1,11 +1,10 @@
 import torch
 import torch.nn.functional as F
-from torch.autograd import Variable
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pack_sequence
+from torch.nn.utils.rnn import pad_packed_sequence, pack_sequence
 
 import numpy as np
 from boltons.iterutils import pairwise, windowed
-from itertools import groupby, combinations
+from itertools import combinations
 from collections import defaultdict
 
 
@@ -77,23 +76,6 @@ def pack(tensors):
 
     return packed, reorder
 
-
-def prune(spans, T, LAMBDA=0.40):
-    """ Prune mention scores to the top lambda percent.
-    Returns list of tuple(scores, indices, g_i) """
-
-    # Only take top λT spans, where T = len(doc)
-    STOP = int(LAMBDA * T)
-
-    # Sort by mention score, remove overlapping spans, prune to top λT spans
-    sorted_spans = sorted(spans, key=lambda s: s.si, reverse=True)
-    nonoverlapping = remove_overlapping(sorted_spans)
-    pruned_spans = nonoverlapping[:STOP]
-
-    # Resort by start, end indexes
-    spans = sorted(pruned_spans, key=lambda s: (s.i1, s.i2))
-
-    return spans
 
 def remove_overlapping(sorted_spans):
     """ Remove spans that are overlapping by order of decreasing mention score
