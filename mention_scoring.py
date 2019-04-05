@@ -3,7 +3,7 @@ import torch
 from torch import nn as nn
 from torch.nn import functional as F
 
-from loader import Span
+from data_schema import Span
 from scoring import Score, Distance
 from utils import compute_idx_spans, pad_and_stack, remove_overlapping
 
