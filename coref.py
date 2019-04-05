@@ -27,27 +27,17 @@ class CorefScore(nn.Module):
     """ Super class to compute coreference links between spans
     """
     def __init__(self, embeds_dim,
-                       hidden_dim,
-                       char_filters=50,
-                       distance_dim=20,
-                       genre_dim=20,
-                       speaker_dim=20):
+                 lstm_hidden_dim,
+                 char_filters=50,
+                 distance_dim=20,
+                 genre_dim=20,
+                 speaker_dim=20):
 
         super().__init__()
 
-        # Forward and backward pass over the document
-        attn_dim = hidden_dim*2
-
-        # Forward and backward passes, avg'd attn over embeddings, span width
-        gi_dim = attn_dim*2 + embeds_dim + distance_dim
-
-        # gi, gj, gi*gj, distance between gi and gj
-        gij_dim = gi_dim*3 + distance_dim + genre_dim + speaker_dim
-
-        # Initialize modules
-        self.encoder = DocumentEncoder(hidden_dim, char_filters)
-        self.span_scorer = MentionScorer(gi_dim, attn_dim, distance_dim)
-        self.span_pair_scorer = PairwiseScorer(gij_dim, distance_dim, genre_dim, speaker_dim)
+        self.encoder = DocumentEncoder(lstm_hidden_dim, char_filters)
+        self.span_scorer = MentionScorer(embeds_dim, self.encoder.biLSTM_dim, distance_dim)
+        self.span_pair_scorer = PairwiseScorer(self.span_scorer.span_repr_dim,distance_dim, genre_dim, speaker_dim)
 
     def forward(self, doc:Document):
         contextualized_encoded, embeds = self.encoder(doc.sents)
@@ -151,23 +141,21 @@ class Trainer:
             if (span.start, span.end) in gold_mentions:
                 mentions_found += 1
 
-                # Check which of these tuples are in the gold set, if any
                 golds = [
-                    i for i, link in enumerate(span.antecedent_span_ids)
+                    i for i, link in enumerate(span.antspan_span)
                     if link in gold_corefs
                 ]
 
                 # If gold_pred_idx is not empty, consider the probabilities of the found antecedents
-                if golds:
+                if len(golds)>0:
                     gold_indexes[idx, golds] = 1
 
-                    # Progress logging for recall
                     corefs_found += len(golds)
-                    found_corefs = sum((probs[idx, golds] > probs[idx, len(span.antecedent_span_ids)])).detach()
+                    found_corefs = sum((probs[idx, golds] > probs[idx, len(span.antspan_span)])).detach()
                     corefs_chosen += found_corefs.item()
                 else:
                     # Otherwise, set gold to dummy
-                    gold_indexes[idx, len(span.antecedent_span_ids)] = 1
+                    gold_indexes[idx, len(span.antspan_span)] = 1
 
         # Negative marginal log-likelihood
         eps = 1e-8
@@ -308,7 +296,7 @@ class Trainer:
 
 
 # Initialize model, train
-model = CorefScore(embeds_dim=350, hidden_dim=200)
+model = CorefScore(embeds_dim=350, lstm_hidden_dim=200)
 # ?? train for 150 epochs, each each train 100 documents
 trainer = Trainer(model, train_corpus, val_corpus, test_corpus, steps=100)
 trainer.train(150)

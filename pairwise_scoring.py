@@ -11,16 +11,18 @@ from utils import speaker_label, to_cuda, pairwise_indexes, to_var, pad_and_stac
 
 
 class PairwiseScorer(nn.Module):
-    """ Coreference pair scoring module
-    """
-    def __init__(self, gij_dim, distance_dim, genre_dim, speaker_dim):
+
+    def __init__(self, span_repr_dim, distance_dim, genre_dim, speaker_dim):
         super().__init__()
+
+        phi_feature_dim = distance_dim + genre_dim + speaker_dim
+        ant_scorer_input_dim = span_repr_dim * 3 + phi_feature_dim
 
         self.distance = DistanceEmbedder(distance_dim)
         self.genre = Genre(genre_dim)
         self.speaker = Speaker(speaker_dim)
 
-        self.score = FFNN(gij_dim)
+        self.score = FFNN(ant_scorer_input_dim)
 
     def forward(self, spans:List[Span], span_representations, mention_scores):
 
@@ -32,7 +34,7 @@ class PairwiseScorer(nn.Module):
         mention_ids = to_cuda(torch.tensor(mention_ids))
         antecedent_ids = to_cuda(torch.tensor(antecedent_ids))
 
-        phi = torch.cat((self.distance(distances),
+        phi_feature = torch.cat((self.distance(distances),
                          self.genre(genres),
                          self.speaker(speakers)), dim=1)
 
@@ -42,7 +44,7 @@ class PairwiseScorer(nn.Module):
         m_r = get_representations(mention_ids)
         a_r = get_representations(antecedent_ids)
 
-        pairs = torch.cat((m_r, a_r, m_r*a_r, phi), dim=1)
+        pairs = torch.cat((m_r, a_r, m_r*a_r, phi_feature), dim=1)
 
 
         def get_mention_scores(ids):
@@ -56,18 +58,17 @@ class PairwiseScorer(nn.Module):
 
         spans = [
             attr.evolve(span,
-                        antecedent_span_ids=[((ant_span.start, ant_span.end), (span.start, span.end)) for ant_span in span.antecedent_spans]
+                        antspan_span=[((ant_span.start, ant_span.end), (span.start, span.end)) for ant_span in span.antecedent_spans]
                         )
             for span, score in zip(spans, coref_scores)
         ]
 
-        # Get antecedent indexes for each span
-        antecedent_idx = [len(s.antecedent_spans) for s in spans if len(s.antecedent_spans)]
+        list_num_ant_spans = [len(s.antecedent_spans) for s in spans if len(s.antecedent_spans)>0]
 
         # Split coref scores so each list entry are scores for its antecedents, only.
         # (NOTE that first index is a special case for torch.split, so we handle it here)
         split_scores = [to_cuda(torch.tensor([]))] \
-                         + list(torch.split(coref_scores, antecedent_idx, dim=0))
+                         + list(torch.split(coref_scores, list_num_ant_spans, dim=0))
 
         epsilon = to_var(torch.tensor([[0.]]))
         with_epsilon = [torch.cat((score, epsilon), dim=0) for score in split_scores]

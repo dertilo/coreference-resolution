@@ -10,12 +10,13 @@ from utils import compute_idx_spans, pad_and_stack, remove_overlapping
 
 class MentionScorer(nn.Module):
 
-    def __init__(self, gi_dim, attn_dim, distance_dim):
+    def __init__(self, embeds_dim, attn_dim, distance_dim):
         super().__init__()
 
+        self.span_repr_dim = attn_dim*2 + embeds_dim + distance_dim
         self.attention = FFNN(attn_dim)#TODO(tilo): how is this an attention?
         self.width = DistanceEmbedder(distance_dim)
-        self.ffnn = FFNN(gi_dim)
+        self.ffnn = FFNN(self.span_repr_dim)
 
     def forward(self, context_enc, embeds, doc:Document, num_max_antecedents=250):
 

@@ -70,7 +70,7 @@ class Span:
 
     mention_score = attr.ib(default=None)
     antecedent_spans = attr.ib(default=None)
-    antecedent_span_ids = attr.ib(default=None)
+    antspan_span = attr.ib(default=None)
 
     def __len__(self):
         return self.end - self.start + 1

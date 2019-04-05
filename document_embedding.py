@@ -13,6 +13,7 @@ class DocumentEncoder(nn.Module):
     """
     def __init__(self, hidden_dim, char_filters, n_layers=2):
         super().__init__()
+        self.biLSTM_dim = hidden_dim * 2
 
         # Unit vector embeddings as per Section 7.1 of paper
         glove_weights = F.normalize(GLOVE.weights())
