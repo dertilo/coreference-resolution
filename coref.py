@@ -3,7 +3,8 @@
 import io
 
 from loader import GLOVE, lookup_tensor, test_corpus, val_corpus, train_corpus
-from scoring import PairwiseScore, MentionScorer
+from pairwise_scoring import PairwiseScore
+from mention_scoring import MentionScorer
 from utils import to_cuda, unpack_and_unpad, pack, flatten, extract_gold_corefs, safe_divide
 
 print('Initializing...')
