@@ -2,16 +2,16 @@
 # Early stopping
 import io
 
-from loader import GLOVE, lookup_tensor, test_corpus, val_corpus, train_corpus
+from document_embedding import DocumentEncoder
+from loader import test_corpus, val_corpus, train_corpus
 from pairwise_scoring import PairwiseScore
 from mention_scoring import MentionScorer
-from utils import to_cuda, unpack_and_unpad, pack, flatten, extract_gold_corefs, safe_divide
+from utils import to_cuda, flatten, extract_gold_corefs, safe_divide
 
 print('Initializing...')
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
 
 import random
 import numpy as np
@@ -20,132 +20,6 @@ from tqdm import tqdm
 from datetime import datetime
 from subprocess import Popen, PIPE
 import os
-
-
-class CharCNN(nn.Module):
-    """ Character-level CNN. Contains character embeddings.
-    """
-
-    unk_idx = 1
-    vocab = train_corpus.char_vocab
-    _stoi = {char: idx+2 for idx, char in enumerate(vocab)}
-    pad_size = 15
-
-    def __init__(self, filters, char_dim=8):
-        super().__init__()
-
-        self.embeddings = nn.Embedding(len(self.vocab)+2, char_dim, padding_idx=0)
-        self.convs = nn.ModuleList([nn.Conv1d(in_channels=self.pad_size,
-                                              out_channels=filters,
-                                              kernel_size=n) for n in (3,4,5)])
-
-    def forward(self, sent):
-        """ Compute filter-dimensional character-level features for each doc token """
-        embedded = self.embeddings(self.sent_to_tensor(sent))
-        convolved = torch.cat([F.relu(conv(embedded)) for conv in self.convs], dim=2)
-        pooled = F.max_pool1d(convolved, convolved.shape[2]).squeeze(2)
-        return pooled
-
-    def sent_to_tensor(self, sent):
-        """ Batch-ify a document class instance for CharCNN embeddings """
-        tokens = [self.token_to_idx(t) for t in sent]
-        batch = self.char_pad_and_stack(tokens)
-        return batch
-
-    def token_to_idx(self, token):
-        """ Convert a token to its character lookup ids """
-        return to_cuda(torch.tensor([self.stoi(c) for c in token]))
-
-    def char_pad_and_stack(self, tokens):
-        """ Pad and stack an uneven tensor of token lookup ids """
-        skimmed = [t[:self.pad_size] for t in tokens]
-
-        lens = [len(t) for t in skimmed]
-
-        padded = [F.pad(t, (0, self.pad_size-length))
-                  for t, length in zip(skimmed, lens)]
-
-        return torch.stack(padded)
-
-    def stoi(self, char):
-        """ Lookup char id. <PAD> is 0, <UNK> is 1. """
-        idx = self._stoi.get(char)
-        return idx if idx else self.unk_idx
-
-
-class DocumentEncoder(nn.Module):
-    """ Document encoder for tokens
-    """
-    def __init__(self, hidden_dim, char_filters, n_layers=2):
-        super().__init__()
-
-        # Unit vector embeddings as per Section 7.1 of paper
-        glove_weights = F.normalize(GLOVE.weights())
-        # turian_weights = F.normalize(TURIAN.weights())
-
-        # GLoVE
-        self.glove = nn.Embedding(glove_weights.shape[0], glove_weights.shape[1])
-        self.glove.weight.data.copy_(glove_weights)
-        self.glove.weight.requires_grad = False
-
-        # Turian
-        # self.turian = nn.Embedding(turian_weights.shape[0], turian_weights.shape[1])
-        # self.turian.weight.data.copy_(turian_weights)
-        # self.turian.weight.requires_grad = False
-
-        # Character
-        self.char_embeddings = CharCNN(char_filters)
-
-        # Sentence-LSTM
-        self.lstm = nn.LSTM(glove_weights.shape[1]+char_filters,
-                            hidden_dim,
-                            num_layers=n_layers,
-                            bidirectional=True,
-                            batch_first=True)
-
-        # Dropout
-        self.emb_dropout = nn.Dropout(0.50, inplace=True)
-        self.lstm_dropout = nn.Dropout(0.20, inplace=True)
-
-    def forward(self, doc):
-        """ Convert document words to ids, embed them, pass through LSTM. """
-
-        # Embed document
-        embeds = [self.embed(s) for s in doc.sents]
-
-        # Batch for LSTM
-        packed, reorder = pack(embeds)
-
-        # Apply embedding dropout
-        self.emb_dropout(packed[0])
-
-        # Pass an LSTM over the embeds
-        output, _ = self.lstm(packed)
-
-        # Apply dropout
-        self.lstm_dropout(output[0])
-
-        # Undo the packing/padding required for batching
-        states = unpack_and_unpad(output, reorder)
-
-        return torch.cat(states, dim=0), torch.cat(embeds, dim=0)
-
-    def embed(self, sent):
-        """ Embed a sentence using GLoVE, Turian, and character embeddings """
-
-        # Embed the tokens with Glove
-        glove_embeds = self.glove(lookup_tensor(sent, GLOVE))
-
-        # Embed again using Turian this time
-        # tur_embeds = self.turian(lookup_tensor(sent, TURIAN))
-
-        # Character embeddings
-        char_embeds = self.char_embeddings(sent)
-
-        # Concatenate them all together
-        embeds = torch.cat((glove_embeds, char_embeds), dim=1)
-
-        return embeds
 
 
 class CorefScore(nn.Module):
