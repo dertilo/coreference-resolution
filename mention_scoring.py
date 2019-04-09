@@ -1,11 +1,12 @@
 import attr
 import torch
+from boltons.iterutils import windowed
 from torch import nn as nn
 from torch.nn import functional as F
 
 from data_schema import Span, Document
 from scoring import FFNN, DistanceEmbedder
-from utils import compute_idx_spans, pad_and_stack, remove_overlapping
+from utils import pad_and_stack, remove_overlapping, flatten
 
 
 class MentionScorer(nn.Module):
@@ -14,9 +15,9 @@ class MentionScorer(nn.Module):
         super().__init__()
 
         self.span_repr_dim = attn_dim*2 + embeds_dim + distance_dim
-        self.attention = FFNN(attn_dim)#TODO(tilo): how is this an attention?
+        self.attention = FFNN(attn_dim,hidden_dim=50)#TODO(tilo): how is this an attention?
         self.width = DistanceEmbedder(distance_dim)
-        self.ffnn = FFNN(self.span_repr_dim)
+        self.ffnn = FFNN(self.span_repr_dim,hidden_dim=50)
 
     def forward(self, context_enc, embeds, doc:Document, num_max_antecedents=250):
 
@@ -45,6 +46,7 @@ class MentionScorer(nn.Module):
 
         span_representations = torch.cat((lstm_embed_start_end, attn_embeds, widths), dim=1) # g_i in paper
 
+        mention_startends = [(span.start,span.end) for span in spans]
         mention_scores = self.ffnn(span_representations)
 
         # Update span object attributes
@@ -64,7 +66,7 @@ class MentionScorer(nn.Module):
             for idx, span in enumerate(spans)
         ]
 
-        return spans, span_representations, mention_scores
+        return spans, span_representations, mention_scores,mention_startends
 
 
 def prune(spans, T, LAMBDA=0.40):
@@ -83,3 +85,18 @@ def prune(spans, T, LAMBDA=0.40):
     spans = sorted(pruned_spans, key=lambda s: (s.start, s.end))
 
     return spans
+
+
+def compute_idx_spans(sentences, max_num_tokens_in_span=10):
+    """ Compute span indexes for all possible spans up to length L in each
+    sentence """
+    def spans_in_sentence(sent, length,shift):
+        return windowed(range(shift, len(sent)+shift), length)
+
+    idx_spans, shift = [], 0
+    for sent in sentences:
+        sent_spans = flatten([spans_in_sentence(sent,length,shift) for length in range(1, max_num_tokens_in_span)])
+        idx_spans.extend(sent_spans)
+        shift += len(sent)
+
+    return idx_spans

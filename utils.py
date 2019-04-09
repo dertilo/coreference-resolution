@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_packed_sequence, pack_sequence
 
 import numpy as np
-from boltons.iterutils import pairwise, windowed
+from boltons.iterutils import pairwise
 from itertools import combinations
 from collections import defaultdict
 
@@ -129,19 +129,6 @@ def extract_gold_corefs(document):
 
     return gold_corefs, gold_mentions
 
-def compute_idx_spans(sentences, max_num_tokens_in_span=10):
-    """ Compute span indexes for all possible spans up to length L in each
-    sentence """
-    def spans_in_sentence(sent, length,shift):
-        return windowed(range(shift, len(sent)+shift), length)
-
-    idx_spans, shift = [], 0
-    for sent in sentences:
-        sent_spans = flatten([spans_in_sentence(sent,length,shift) for length in range(1, max_num_tokens_in_span)])
-        idx_spans.extend(sent_spans)
-        shift += len(sent)
-
-    return idx_spans
 
 def s_to_speaker(span, speakers):
     """ Compute speaker of a span """

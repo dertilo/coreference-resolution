@@ -6,7 +6,7 @@ import attr
 from boltons.iterutils import pairwise
 from cached_property import cached_property
 
-from utils import compute_idx_spans, flatten
+from utils import flatten
 
 
 class Document:

@@ -1,6 +1,3 @@
-ipython
-jupyter
-nltk
 torch==0.4.1
 torchtext
 boltons

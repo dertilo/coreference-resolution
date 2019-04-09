@@ -21,6 +21,7 @@ from tqdm import tqdm
 from datetime import datetime
 from subprocess import Popen, PIPE
 import os
+import torch.nn.functional as F
 
 
 class CorefScore(nn.Module):
@@ -42,17 +43,17 @@ class CorefScore(nn.Module):
     def forward(self, doc:Document):
         contextualized_encoded, embeds = self.encoder(doc.sents)
 
-        spans, g_i, mention_scores = self.span_scorer(contextualized_encoded, embeds, doc)
+        spans, span_representation, mention_scores,mention_startends = self.span_scorer(contextualized_encoded, embeds, doc)
 
-        spans, coref_scores = self.span_pair_scorer(spans, g_i, mention_scores)
+        spans, coref_scores = self.span_pair_scorer(spans, span_representation, mention_scores)
 
-        return spans, coref_scores
+        return spans, coref_scores,mention_scores,mention_startends
 
 
 class Trainer:
     """ Class dedicated to training and evaluating the model
     """
-    def __init__(self, model, train_corpus, val_corpus, test_corpus,
+    def __init__(self, model:CorefScore, train_corpus, val_corpus, test_corpus,
                     lr=1e-3, steps=100):
 
         self.__dict__.update(locals())
@@ -60,9 +61,12 @@ class Trainer:
         self.train_corpus = list(self.train_corpus)
         self.val_corpus = self.val_corpus
         
-        self.model = to_cuda(model)
+        self.model:CorefScore = to_cuda(model)
 
         self.optimizer = optim.Adam(params=[p for p in self.model.parameters()
+                                            if p.requires_grad],
+                                    lr=lr)
+        self.mention_optimizer = optim.Adam(params=[p for p in self.model.parameters()
                                             if p.requires_grad],
                                     lr=lr)
 
@@ -128,16 +132,24 @@ class Trainer:
         gold_corefs, gold_mentions = extract_gold_corefs(document)
 
         self.optimizer.zero_grad()
+        self.mention_optimizer.zero_grad()
 
         mentions_found, corefs_found, corefs_chosen = 0, 0, 0
 
-        spans, probs = self.model(document)
+        spans, probs, mention_scores, mention_startends = self.model(document)
 
-        # Get log-likelihood of correct antecedents implied by gold clustering
+        # mention_gold_indexes = to_cuda(torch.zeros_like(mention_scores))
+        # for i, startend in enumerate(mention_startends):
+        #     if startend in gold_mentions:
+        #         mention_gold_indexes[i]=1
+        # mention_loss = F.binary_cross_entropy_with_logits(mention_scores, mention_gold_indexes)
+        # mention_loss.backward(retain_graph=True)
+        # print('mention-loss: %0.2f'%mention_loss.item())
+        # self.mention_optimizer.step()
+
         gold_indexes = to_cuda(torch.zeros_like(probs))
         for idx, span in enumerate(spans):
 
-            # Log number of mentions found
             if (span.start, span.end) in gold_mentions:
                 mentions_found += 1
 
@@ -151,20 +163,18 @@ class Trainer:
                     gold_indexes[idx, golds] = 1
 
                     corefs_found += len(golds)
-                    found_corefs = sum((probs[idx, golds] > probs[idx, len(span.antspan_span)])).detach()
+                    coref_prob_to_dummy_antecedent = probs[idx, len(span.antspan_span)]
+                    found_corefs = sum((probs[idx, golds] > coref_prob_to_dummy_antecedent)).detach()
                     corefs_chosen += found_corefs.item()
                 else:
-                    # Otherwise, set gold to dummy
                     gold_indexes[idx, len(span.antspan_span)] = 1
 
         # Negative marginal log-likelihood
         eps = 1e-8
-        loss = torch.sum(torch.log(torch.sum(torch.mul(probs, gold_indexes), dim=1).clamp_(eps, 1-eps)), dim=0) * -1
+        spanwise_summed_gold_probs = torch.sum(torch.mul(probs, gold_indexes), dim=1).clamp_(eps, 1 - eps)
+        loss = torch.sum(torch.log(spanwise_summed_gold_probs), dim=0) * -1
 
-        # Backpropagate
         loss.backward()
-
-        # Step the optimizer
         self.optimizer.step()
 
         return (loss.item(), mentions_found, len(gold_mentions),
@@ -296,7 +306,7 @@ class Trainer:
 
 
 # Initialize model, train
-model = CorefScore(embeds_dim=350, lstm_hidden_dim=200)
+model = CorefScore(embeds_dim=350, lstm_hidden_dim=20) # paper says 200
 # ?? train for 150 epochs, each each train 100 documents
 trainer = Trainer(model, train_corpus, val_corpus, test_corpus, steps=100)
 trainer.train(150)

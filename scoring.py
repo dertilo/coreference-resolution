@@ -4,7 +4,7 @@ from utils import to_cuda
 
 
 class FFNN(nn.Module):
-    def __init__(self, embeds_dim, hidden_dim=150):
+    def __init__(self, embeds_dim, hidden_dim=50):# paper says 150
         super().__init__()
 
         self.score = nn.Sequential(
